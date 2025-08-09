@@ -28,6 +28,12 @@ DEFAULT_CONFIG = {
     "max_recur_limit": 100,
     # Tool settings
     "online_tools": True,
+    # 当为 True 时：严格在线模式，禁用一切离线/缓存回退与自动切换离线
+    "force_online": True,
+    # Reddit API 凭证（如未设置环境变量，将回退使用这里的值）
+    "reddit_client_id": "eUGTyjovYfEixeFljZ2NaA",
+    "reddit_client_secret": "H-w9zoj8CftAREJ4Bac0tth-hRcktg",
+    "reddit_user_agent": "SilenceHan personal use script",
     # 是否使用 OpenAI Responses 的 web_search 工具流（需 OPENAI_API_KEY 且提供商为 openai）
     "use_openai_responses": os.getenv("TRADINGAGENTS_USE_OAI_RESPONSES", "false").lower() == "true",
     # 是否使用 Responses 流式接口以等待工具完成

@@ -62,8 +62,9 @@ class Toolkit:
         """
         
         cfg = Toolkit._config
+        force_online = bool(cfg.get("force_online", False))
         # 优先在线 Reddit（通过 OpenAI web_search 或 Pushshift 的在线方案，已在 interface 中实现 online 版本）
-        if bool(cfg.get("online_tools", True)):
+        if bool(cfg.get("online_tools", True)) or force_online:
             try:
                 # 在线全局 Reddit 汇总
                 from tradingagents.dataflows.interface import get_reddit_global_news_online
@@ -72,6 +73,8 @@ class Toolkit:
                     return online
             except Exception:
                 pass
+        if force_online:
+            return ""  # 严格在线模式下不回退
         if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive" and bool(cfg.get("use_multi_layer_window", False)):
             return interface.get_reddit_global_news_multi(curr_date)
         if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
@@ -107,7 +110,8 @@ class Toolkit:
         look_back_days = (end_date - start_date).days
 
         cfg = Toolkit._config
-        if bool(cfg.get("online_tools", True)):
+        force_online = bool(cfg.get("force_online", False))
+        if bool(cfg.get("online_tools", True)) or force_online:
             finnhub_news_result = interface.get_finnhub_news_online(
                 ticker, end_date_str, look_back_days
             )
@@ -137,7 +141,8 @@ class Toolkit:
         """
 
         cfg = Toolkit._config
-        if bool(cfg.get("online_tools", True)):
+        force_online = bool(cfg.get("force_online", False))
+        if bool(cfg.get("online_tools", True)) or force_online:
             try:
                 from tradingagents.dataflows.interface import get_reddit_company_news_online
                 online = get_reddit_company_news_online(ticker, curr_date)
@@ -145,6 +150,8 @@ class Toolkit:
                     return online
             except Exception:
                 pass
+        if force_online:
+            return ""
         if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive" and bool(cfg.get("use_multi_layer_window", False)):
             return interface.get_reddit_company_news_multi(ticker, curr_date)
         if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
@@ -172,6 +179,16 @@ class Toolkit:
 
         # Respect adaptive windowing when caller passes curr_date in end_date slot
         cfg = Toolkit._config
+        if bool(cfg.get("force_online", False)):
+            # 强制在线：改道到在线接口
+            try:
+                if start_date == "auto" and str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
+                    if bool(cfg.get("use_multi_layer_window", False)):
+                        return interface.get_YFin_data_online_multi(symbol, end_date)
+                    return interface.get_YFin_data_online_auto(symbol, end_date)
+            except Exception:
+                pass
+            return interface.get_YFin_data_online(symbol, start_date, end_date)
         try:
             if start_date == "auto" and str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
                 if bool(cfg.get("use_multi_layer_window", False)):
@@ -236,6 +253,13 @@ class Toolkit:
         """
 
         cfg = Toolkit._config
+        if bool(cfg.get("force_online", False)):
+            # 强制在线：直接走在线版本
+            if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
+                if bool(cfg.get("use_multi_layer_window", False)):
+                    return interface.get_stock_stats_indicators_multi(symbol, indicator, curr_date, True)
+                return interface.get_stock_stats_indicators_auto(symbol, indicator, curr_date, True)
+            return interface.get_stock_stats_indicators_window(symbol, indicator, curr_date, look_back_days, True)
         if str(cfg.get("windowing_mode", "adaptive")).lower() == "adaptive":
             if bool(cfg.get("use_multi_layer_window", False)):
                 return interface.get_stock_stats_indicators_multi(symbol, indicator, curr_date, False)
@@ -295,7 +319,7 @@ class Toolkit:
         """
 
         cfg = Toolkit._config
-        if bool(cfg.get("online_tools", True)):
+        if bool(cfg.get("online_tools", True)) or bool(cfg.get("force_online", False)):
             try:
                 return interface.get_finnhub_company_insider_sentiment_online(
                     ticker, curr_date, 30
@@ -325,7 +349,7 @@ class Toolkit:
         """
 
         cfg = Toolkit._config
-        if bool(cfg.get("online_tools", True)):
+        if bool(cfg.get("online_tools", True)) or bool(cfg.get("force_online", False)):
             try:
                 return interface.get_finnhub_company_insider_transactions_online(
                     ticker, curr_date, 30

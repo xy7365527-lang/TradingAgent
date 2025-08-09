@@ -30,6 +30,14 @@ class StockstatsUtils:
         df = None
         data = None
 
+        # 强制在线模式绕过离线读取
+        try:
+            from .config import get_config
+            if bool(get_config().get("force_online", False)):
+                online = True
+        except Exception:
+            pass
+
         if not online:
             try:
                 data = pd.read_csv(
@@ -51,8 +59,9 @@ class StockstatsUtils:
             start_date = start_date.strftime("%Y-%m-%d")
             end_date = end_date.strftime("%Y-%m-%d")
 
-            # Get config and ensure cache directory exists
+            # Get config and ensure cache directory exists（强制在线模式禁用缓存回退写入）
             config = get_config()
+            force_online = bool(config.get("force_online", False))
             os.makedirs(config["data_cache_dir"], exist_ok=True)
 
             data_file = os.path.join(
@@ -60,7 +69,7 @@ class StockstatsUtils:
                 f"{symbol}-YFin-data-{start_date}-{end_date}.csv",
             )
 
-            if os.path.exists(data_file):
+            if os.path.exists(data_file) and not force_online:
                 data = pd.read_csv(data_file)
                 data["Date"] = pd.to_datetime(data["Date"])
             else:
@@ -89,7 +98,7 @@ class StockstatsUtils:
                         config["data_cache_dir"], f"{symbol}-YFin-data-*.csv"
                     )
                     candidates = sorted(glob.glob(pattern), reverse=True)
-                    if candidates:
+                    if candidates and not force_online:
                         data = pd.read_csv(candidates[0])
                         data["Date"] = pd.to_datetime(data["Date"])
                     else:
@@ -101,7 +110,7 @@ class StockstatsUtils:
                             glob.glob(os.path.join(offline_dir, f"{symbol}-YFin-data-*.csv")),
                             reverse=True,
                         )
-                        if offline_candidates:
+                        if offline_candidates and not force_online:
                             data = pd.read_csv(offline_candidates[0])
                             # 兼容不同列名大小写或日期列类型
                             if "Date" in data.columns:
@@ -110,11 +119,12 @@ class StockstatsUtils:
                                 data.rename(columns={"date": "Date"}, inplace=True)
                                 data["Date"] = pd.to_datetime(data["Date"])  
                         else:
-                            # 最终降级：返回缺失，避免抛出异常中断流程
-                            return "N/A: Data unavailable due to network failure and no cache"
+                            # 强制在线：直接提示网络错误
+                            return "N/A: force_online enabled and network fetch failed"
                 else:
                     data = downloaded.reset_index()
-                    data.to_csv(data_file, index=False)
+                    if not force_online:
+                        data.to_csv(data_file, index=False)
 
             df = wrap(data)
             df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")

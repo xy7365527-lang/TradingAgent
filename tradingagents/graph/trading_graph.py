@@ -47,6 +47,12 @@ class TradingAgentsGraph:
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        # 在强制在线模式下，确保 online_tools 恒为 True
+        try:
+            if bool(self.config.get("force_online", False)):
+                self.config["online_tools"] = True
+        except Exception:
+            pass
 
         # Update the interface's config
         set_config(self.config)
@@ -127,16 +133,14 @@ class TradingAgentsGraph:
         - When True: expose online tools (plus offline as fallback where helpful)
         - When False: expose only offline tools to avoid network calls
         """
-        online = bool(self.config.get("online_tools", True))
+        force_online = bool(self.config.get("force_online", False))
+        online = True if force_online else bool(self.config.get("online_tools", True))
 
         # Market tools
         if online:
             market_tools = [
                 self.toolkit.get_YFin_data_online,
                 self.toolkit.get_stockstats_indicators_report_online,
-                # keep offline as fallback options for the agent
-                self.toolkit.get_YFin_data,
-                self.toolkit.get_stockstats_indicators_report,
             ]
         else:
             market_tools = [

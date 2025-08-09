@@ -1077,6 +1077,9 @@ class TradingAgentsGUI(tk.Tk):
         deep_model = self.var_deep.get().strip() or quick_model
 
         config = DEFAULT_CONFIG.copy()
+        # 强制在线模式：始终在线，不自动降级
+        config["force_online"] = True
+        config["online_tools"] = True
         config["max_debate_rounds"] = self.var_depth.get()
         config["max_risk_discuss_rounds"] = self.var_depth.get()
         config["quick_think_llm"] = quick_model
@@ -1225,18 +1228,7 @@ class TradingAgentsGUI(tk.Tk):
                             time.sleep(1.5 * attempts)
                             continue
                         else:
-                            # 在多次失败后，自动切换为离线模式再试一次
-                            if not offline_fallback_used and config.get("online_tools", True):
-                                offline_fallback_used = True
-                                config["online_tools"] = False
-                                self.after(0, lambda: self.append("网络不稳定，切换为离线模式继续（指标改用本地/缓存数据）…"))
-                                # 重新构建图（使用仅离线工具的节点）
-                                graph = TradingAgentsGraph(analysts, config=config, debug=True)
-                                init_state = graph.propagator.create_initial_state(ticker, date_str)
-                                args = graph.propagator.get_graph_args()
-                                trace = []
-                                attempts = 0
-                                continue
+                            # 强制在线时不降级离线，直接抛出错误
                             raise e
                 # 完成
                 final_state = trace[-1]

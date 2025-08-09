@@ -52,7 +52,7 @@ def fetch_company_news_online(ticker: str, start_date: str, end_date: str, api_k
     """
     token = api_key or os.environ.get("FINNHUB_API_KEY")
     if not token:
-        # No token: return empty to let caller degrade gracefully
+        # 强制在线模式下没有 key 直接返回空，由上层负责提示
         return []
 
     url = "https://finnhub.io/api/v1/company-news"

@@ -76,9 +76,11 @@ def _write_jsonl(path: str, records: List[dict]) -> int:
 def _load_praw():
     import praw  # lazy import
 
-    cid = os.environ.get("REDDIT_CLIENT_ID")
-    csec = os.environ.get("REDDIT_CLIENT_SECRET")
-    uag = os.environ.get("REDDIT_USER_AGENT") or "TradingAgents/1.0 by TauricResearch"
+    from .config import get_config
+    cfg = get_config()
+    cid = os.environ.get("REDDIT_CLIENT_ID") or cfg.get("reddit_client_id")
+    csec = os.environ.get("REDDIT_CLIENT_SECRET") or cfg.get("reddit_client_secret")
+    uag = os.environ.get("REDDIT_USER_AGENT") or cfg.get("reddit_user_agent") or "TradingAgents/1.0 by TauricResearch"
     if not cid or not csec:
         raise RuntimeError("Missing Reddit API credentials: set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET")
     return praw.Reddit(client_id=cid, client_secret=csec, user_agent=uag)

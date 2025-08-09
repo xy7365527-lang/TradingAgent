@@ -22,7 +22,7 @@ def is_rate_limited(response):
 @retry(
     retry=(retry_if_result(is_rate_limited)),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    stop=stop_after_attempt(5),
+    stop=stop_after_attempt(7),
     # 当重试耗尽时，不抛出 RetryError，而是返回最后一次响应（可能仍为 429）
     retry_error_callback=lambda rs: (rs.outcome.result() if rs and rs.outcome else None),
 )
@@ -30,7 +30,7 @@ def make_request(url, headers):
     """Make a request with retry logic for rate limiting"""
     # Random delay before each request to avoid detection
     time.sleep(random.uniform(2, 6))
-    response = requests.get(url, headers=headers, timeout=15)
+    response = requests.get(url, headers=headers, timeout=20)
     return response
 
 
@@ -167,7 +167,7 @@ def getNewsData(query, start_date, end_date):
             page += 1
 
         except Exception:
-            # 其它异常也返回已有结果，避免噪音
+            # 其它异常也返回已有结果，避免噪音（force_online 下保持在线，但仍可能部分为空）
             break
 
     return news_results

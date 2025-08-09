@@ -270,7 +270,12 @@ def get_simfin_balance_sheet(
         "us",
         f"us-balance-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+    try:
+        if not os.path.exists(data_path):
+            return get_simfin_balance_sheet_online(ticker, freq, curr_date) or ""
+        df = pd.read_csv(data_path, sep=";")
+    except Exception:
+        return get_simfin_balance_sheet_online(ticker, freq, curr_date) or ""
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -317,7 +322,14 @@ def get_simfin_cashflow(
         "us",
         f"us-cashflow-{freq}.csv",
     )
-    df = pd.read_csv(data_path, sep=";")
+
+    # 若离线文件不存在或读取失败，则优先回退到在线数据，避免抛出 FileNotFoundError
+    try:
+        if not os.path.exists(data_path):
+            return get_simfin_cashflow_online(ticker, freq, curr_date) or ""
+        df = pd.read_csv(data_path, sep=";")
+    except Exception:
+        return get_simfin_cashflow_online(ticker, freq, curr_date) or ""
 
     # Convert date strings to datetime objects and remove any time components
     df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
@@ -363,6 +375,29 @@ def get_simfin_income_statements(
         "companies",
         "us",
         f"us-income-{freq}.csv",
+    )
+    # 如果离线文件不可用，则回退到在线抓取
+    try:
+        if not os.path.exists(data_path):
+            return get_simfin_income_statements_online(ticker, freq, curr_date) or ""
+        df = pd.read_csv(data_path, sep=";")
+    except Exception:
+        return get_simfin_income_statements_online(ticker, freq, curr_date) or ""
+
+    # 统一按发布日期过滤，并选择最近一期
+    df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
+    df["Publish Date"] = pd.to_datetime(df["Publish Date"], utc=True).dt.normalize()
+    curr_date_dt = pd.to_datetime(curr_date, utc=True).normalize()
+    filtered_df = df[(df["Ticker"] == ticker) & (df["Publish Date"] <= curr_date_dt)]
+    if filtered_df.empty:
+        print("No income statement available before the given current date.")
+        return ""
+    latest_income = filtered_df.loc[filtered_df["Publish Date"].idxmax()]
+    latest_income = latest_income.drop("SimFinId")
+    return (
+        f"## {freq} income statement for {ticker} released on {str(latest_income['Publish Date'])[0:10]}: \n"
+        + str(latest_income)
+        + "\n\nThis includes metadata like reporting dates and currency, share details, and a comprehensive breakdown of the company's financial performance. Starting with Revenue, it shows Cost of Revenue and resulting Gross Profit. Operating Expenses are detailed, including SG&A, R&D, and Depreciation. The statement then shows Operating Income, followed by non-operating items and Interest Expense, leading to Pretax Income. After accounting for Income Tax and any Extraordinary items, it concludes with Net Income, representing the company's bottom-line profit or loss for the period."
     )
 
 
@@ -448,34 +483,6 @@ def get_simfin_income_statements_online(
         return header + str(series)
     except Exception:
         return ""
-    df = pd.read_csv(data_path, sep=";")
-
-    # Convert date strings to datetime objects and remove any time components
-    df["Report Date"] = pd.to_datetime(df["Report Date"], utc=True).dt.normalize()
-    df["Publish Date"] = pd.to_datetime(df["Publish Date"], utc=True).dt.normalize()
-
-    # Convert the current date to datetime and normalize
-    curr_date_dt = pd.to_datetime(curr_date, utc=True).normalize()
-
-    # Filter the DataFrame for the given ticker and for reports that were published on or before the current date
-    filtered_df = df[(df["Ticker"] == ticker) & (df["Publish Date"] <= curr_date_dt)]
-
-    # Check if there are any available reports; if not, return a notification
-    if filtered_df.empty:
-        print("No income statement available before the given current date.")
-        return ""
-
-    # Get the most recent income statement by selecting the row with the latest Publish Date
-    latest_income = filtered_df.loc[filtered_df["Publish Date"].idxmax()]
-
-    # drop the SimFinID column
-    latest_income = latest_income.drop("SimFinId")
-
-    return (
-        f"## {freq} income statement for {ticker} released on {str(latest_income['Publish Date'])[0:10]}: \n"
-        + str(latest_income)
-        + "\n\nThis includes metadata like reporting dates and currency, share details, and a comprehensive breakdown of the company's financial performance. Starting with Revenue, it shows Cost of Revenue and resulting Gross Profit. Operating Expenses are detailed, including SG&A, R&D, and Depreciation. The statement then shows Operating Income, followed by non-operating items and Interest Expense, leading to Pretax Income. After accounting for Income Tax and any Extraordinary items, it concludes with Net Income, representing the company's bottom-line profit or loss for the period."
-    )
 
 
 def get_google_news(
@@ -884,6 +891,32 @@ def get_reddit_company_news_online(
             return f"##{ticker.upper()} News Reddit (Online via web_search), from {before} to {curr_date}:\n\n" + text
         except Exception:
             pass
+
+    # Fallback 2 (still online): use Reddit API via PRAW to fetch and then read from cache
+    try:
+        from .reddit_online import fetch_and_cache_company
+        from .reddit_utils import fetch_top_from_category
+        # Fetch online via PRAW into cache
+        fetch_and_cache_company(ticker, curr_date, look_back_days=look_back, per_subreddit_limit=160)
+        # Read back for each day in window and format
+        news_str = ""
+        curr = datetime.strptime(before, "%Y-%m-%d")
+        end = datetime.strptime(curr_date, "%Y-%m-%d")
+        while curr <= end:
+            day = curr.strftime("%Y-%m-%d")
+            items = fetch_top_from_category("company_news", day, int(cfg.get("news_max_per_day", 5)), ticker, data_path=os.path.join(DATA_DIR, "reddit_data"))
+            for post in items:
+                title = (post.get("title") or "").strip()
+                content = (post.get("content") or "").strip()
+                if title:
+                    news_str += f"### {title} ({day})\n"
+                    if content:
+                        news_str += content + "\n\n"
+            curr += relativedelta(days=1)
+        if news_str.strip():
+            return f"##{ticker.upper()} News Reddit (Online via PRAW), from {before} to {curr_date}:\n\n" + news_str
+    except Exception:
+        pass
     return ""
 
 
@@ -932,6 +965,32 @@ def get_reddit_global_news_online(
             return f"## Global News Reddit (Online via web_search), from {before} to {curr_date}:\n\n" + text
         except Exception:
             pass
+
+    # Fallback 2 (still online): use Reddit API via PRAW to fetch and then read from cache
+    try:
+        from .reddit_online import fetch_and_cache_global
+        from .reddit_utils import fetch_top_from_category
+        # Fetch online via PRAW into cache
+        fetch_and_cache_global(curr_date, look_back_days=look_back, per_subreddit_limit=120)
+        # Read back for each day in window and format
+        news_str = ""
+        curr = datetime.strptime(before, "%Y-%m-%d")
+        end = datetime.strptime(curr_date, "%Y-%m-%d")
+        while curr <= end:
+            day = curr.strftime("%Y-%m-%d")
+            items = fetch_top_from_category("global_news", day, int(cfg.get("news_max_per_day", 5)), data_path=os.path.join(DATA_DIR, "reddit_data"))
+            for post in items:
+                title = (post.get("title") or "").strip()
+                content = (post.get("content") or "").strip()
+                if title:
+                    news_str += f"### {title} ({day})\n"
+                    if content:
+                        news_str += content + "\n\n"
+            curr += relativedelta(days=1)
+        if news_str.strip():
+            return f"## Global News Reddit (Online via PRAW), from {before} to {curr_date}:\n\n" + news_str
+    except Exception:
+        pass
     return ""
 def get_stock_stats_indicators_window(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -1159,9 +1218,11 @@ def get_YFin_data_online(
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Try online first with lightweight retry; then fall back to local cache or offline CSVs
+    # Try online first with lightweight retry. If force_online=True,禁用一切离线/缓存回退
     data = None
     last_err: Exception | None = None
+    cfg_now = get_config()
+    force_online = bool(cfg_now.get("force_online", False))
     for attempt in range(3):
         try:
             ticker = yf.Ticker(symbol.upper())
@@ -1174,9 +1235,17 @@ def get_YFin_data_online(
         # Backoff: 1s, 2s, 4s
         time.sleep(1 * (2 ** attempt))
 
-    # Fallback to cache saved by stockstats utils
+    # 在强制在线模式下，直接返回错误信息，不做任何回退
+    if force_online and (data is None or data.empty):
+        msg = (
+            f"No data available for '{symbol}' between {start_date} and {end_date} "
+            f"(force_online enabled; network error: {last_err})"
+        )
+        return msg
+
+    # Fallback to cache saved by stockstats utils（仅在非强制在线模式）
     if data is None or data.empty:
-        cfg = get_config()
+        cfg = cfg_now
         cache_dir = cfg.get("data_cache_dir")
         if cache_dir and os.path.isdir(cache_dir):
             import glob
@@ -1250,7 +1319,27 @@ def get_YFin_data(
     - 若为DataFrame，将被上层使用 `to_string()` 渲染；
     - 若全部失败，返回说明性字符串而非抛异常。
     """
-    # 先尝试读取打包的离线CSV
+    cfg0 = get_config()
+    if bool(cfg0.get("force_online", False)):
+        # 严格在线：改道到在线接口
+        try:
+            ticker = yf.Ticker(symbol.upper())
+            online_df = ticker.history(start=start_date, end=end_date)
+            if getattr(online_df.index, "tz", None) is not None:
+                online_df.index = online_df.index.tz_localize(None)
+            if not online_df.empty:
+                online_df = online_df.copy()
+                online_df.reset_index(inplace=True)
+                online_df.rename(columns={online_df.columns[0]: "Date"}, inplace=True)
+                online_df["Date"] = pd.to_datetime(online_df["Date"]).dt.strftime("%Y-%m-%d")
+                for col in ["Open", "High", "Low", "Close", "Adj Close"]:
+                    if col in online_df.columns:
+                        online_df[col] = pd.to_numeric(online_df[col], errors="coerce").round(2)
+                return online_df.reset_index(drop=True)
+        except Exception:
+            return f"No market data available for '{symbol}' between {start_date} and {end_date} (force_online)"
+
+    # 先尝试读取打包的离线CSV（非严格在线时）
     offline_path = os.path.join(
         DATA_DIR,
         "market_data",
