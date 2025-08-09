@@ -9,6 +9,29 @@ APP_NAME=TradingAgentsGUI
 SPEC_CLI=TradingAgents.spec
 SPEC_GUI=TradingAgentsGUI.spec
 
+# 版本号获取：优先环境变量 APP_VERSION，其次读取 pyproject.toml，最后回退为 0.0.0
+VERSION=${APP_VERSION:-}
+if [[ -z "$VERSION" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    VERSION=$(python3 - << 'PY'
+import sys, re
+try:
+  with open('pyproject.toml', 'r', encoding='utf-8') as f:
+    s = f.read()
+  m = re.search(r"^version\s*=\s*\"([0-9]+\.[0-9]+\.[0-9]+)\"", s, flags=re.M)
+  if m:
+    print(m.group(1))
+  else:
+    print("0.0.0")
+except Exception:
+  print("0.0.0")
+PY
+)
+  else
+    VERSION="0.0.0"
+  fi
+fi
+
 echo "[1/5] 清理旧构建..."
 rm -rf dist build
 
@@ -35,7 +58,7 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 
 echo "[4/5] 生成 DMG..."
-DMG_OUT="dist/${APP_NAME}.dmg"
+DMG_OUT="dist/${APP_NAME}-${VERSION}.dmg"
 if command -v create-dmg >/dev/null 2>&1; then
   rm -f "$DMG_OUT"
   create-dmg --volname "${APP_NAME}" --window-pos 200 120 --window-size 600 400 \

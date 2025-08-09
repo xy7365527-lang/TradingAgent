@@ -1130,40 +1130,24 @@ def get_YFin_data_window(
     curr_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
-    # calculate past days
+    # 计算窗口起始日期
     date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
     before = date_obj - relativedelta(days=look_back_days)
     start_date = before.strftime("%Y-%m-%d")
 
-    # read in data
-    data = pd.read_csv(
-        os.path.join(
-            DATA_DIR,
-            f"market_data/price_data/{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
-        )
-    )
+    # 复用具备离线/缓存/在线回退的 get_YFin_data
+    result = get_YFin_data(symbol, start_date, curr_date)
 
-    # Extract just the date part for comparison
-    data["DateOnly"] = data["Date"].str[:10]
+    # 统一格式化输出
+    if hasattr(result, "to_string"):
+        with pd.option_context(
+            "display.max_rows", None, "display.max_columns", None, "display.width", None
+        ):
+            df_string = result.to_string()
+        return f"## Raw Market Data for {symbol} from {start_date} to {curr_date}:\n\n" + df_string
 
-    # Filter data between the start and end dates (inclusive)
-    filtered_data = data[
-        (data["DateOnly"] >= start_date) & (data["DateOnly"] <= curr_date)
-    ]
-
-    # Drop the temporary column we created
-    filtered_data = filtered_data.drop("DateOnly", axis=1)
-
-    # Set pandas display options to show the full DataFrame
-    with pd.option_context(
-        "display.max_rows", None, "display.max_columns", None, "display.width", None
-    ):
-        df_string = filtered_data.to_string()
-
-    return (
-        f"## Raw Market Data for {symbol} from {start_date} to {curr_date}:\n\n"
-        + df_string
-    )
+    # 若为字符串（例如无数据或联网失败的友好提示），直接返回
+    return str(result)
 
 
 def get_YFin_data_online(
@@ -1260,34 +1244,122 @@ def get_YFin_data(
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ) -> str:
-    # read in data
-    data = pd.read_csv(
-        os.path.join(
-            DATA_DIR,
-            f"market_data/price_data/{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
-        )
+    """Prefer本地离线CSV；若不存在则回退到缓存目录，再不行则在线抓取。
+
+    返回类型保持向后兼容：
+    - 若为DataFrame，将被上层使用 `to_string()` 渲染；
+    - 若全部失败，返回说明性字符串而非抛异常。
+    """
+    # 先尝试读取打包的离线CSV
+    offline_path = os.path.join(
+        DATA_DIR,
+        "market_data",
+        "price_data",
+        f"{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
     )
 
-    if end_date > "2025-03-25":
-        raise Exception(
-            f"Get_YFin_Data: {end_date} is outside of the data range of 2015-01-01 to 2025-03-25"
-        )
+    def _filter_and_format(df: pd.DataFrame) -> pd.DataFrame:
+        # 标准化 Date 列到 YYYY-mm-dd 字符串
+        if "Date" in df.columns:
+            try:
+                df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
+            except Exception:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.tz_localize(None)
+        else:
+            # yfinance 通常以 DatetimeIndex 返回
+            if isinstance(df.index, pd.DatetimeIndex):
+                df = df.reset_index().rename(columns={df.columns[0]: "Date"})
+            elif "Unnamed: 0" in df.columns:  # 常见CSV索引列名
+                df = df.rename(columns={"Unnamed: 0": "Date"})
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.tz_localize(None)
 
-    # Extract just the date part for comparison
-    data["DateOnly"] = data["Date"].str[:10]
+        if "Date" in df.columns:
+            df["DateOnly"] = df["Date"].dt.strftime("%Y-%m-%d")
+            df = df[(df["DateOnly"] >= start_date) & (df["DateOnly"] <= end_date)]
+            df = df.drop(columns=[c for c in ["DateOnly"] if c in df.columns])
+            # 输出时将 Date 转为无时区字符串
+            df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
 
-    # Filter data between the start and end dates (inclusive)
-    filtered_data = data[
-        (data["DateOnly"] >= start_date) & (data["DateOnly"] <= end_date)
-    ]
+        # 数值列做轻度四舍五入，便于展示
+        for col in ["Open", "High", "Low", "Close", "Adj Close"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
 
-    # Drop the temporary column we created
-    filtered_data = filtered_data.drop("DateOnly", axis=1)
+        return df.reset_index(drop=True)
 
-    # remove the index from the dataframe
-    filtered_data = filtered_data.reset_index(drop=True)
+    try:
+        if os.path.exists(offline_path):
+            data = pd.read_csv(offline_path)
+            # 若请求超出离线数据覆盖范围，则回退到在线抓取，而不是抛异常
+            if end_date > "2025-03-25":
+                raise FileNotFoundError  # 触发回退
+            filtered = _filter_and_format(data)
+            if not filtered.empty:
+                return filtered
+    except Exception:
+        # 离线读取失败则继续尝试其它路径
+        pass
 
-    return filtered_data
+    # 尝试缓存目录（由 stockstats 或其它流程写入）
+    cfg = get_config()
+    cache_dir = cfg.get("data_cache_dir")
+    if cache_dir and os.path.isdir(cache_dir):
+        try:
+            import glob
+
+            pattern = os.path.join(cache_dir, f"{symbol}-YFin-data-*.csv")
+            candidates = sorted(glob.glob(pattern), reverse=True)
+            for path in candidates:
+                try:
+                    df = pd.read_csv(path)
+                    df = _filter_and_format(df)
+                    if not df.empty:
+                        return df
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    # 最后回退：在线抓取（yfinance），并写入缓存以便后续使用
+    try:
+        ticker = yf.Ticker(symbol.upper())
+        online_df = ticker.history(start=start_date, end=end_date)
+        if getattr(online_df.index, "tz", None) is not None:
+            online_df.index = online_df.index.tz_localize(None)
+        if not online_df.empty:
+            online_df = online_df.copy()
+            online_df.reset_index(inplace=True)
+            online_df.rename(columns={online_df.columns[0]: "Date"}, inplace=True)
+            online_df["Date"] = pd.to_datetime(online_df["Date"]).dt.strftime("%Y-%m-%d")
+            for col in ["Open", "High", "Low", "Close", "Adj Close"]:
+                if col in online_df.columns:
+                    online_df[col] = pd.to_numeric(online_df[col], errors="coerce").round(2)
+
+            # 写入缓存
+            try:
+                if cache_dir:
+                    os.makedirs(cache_dir, exist_ok=True)
+                    out_path = os.path.join(
+                        cache_dir, f"{symbol}-YFin-data-{start_date}-{end_date}.csv"
+                    )
+                    online_df.to_csv(out_path, index=False)
+            except Exception:
+                pass
+
+            return online_df.reset_index(drop=True)
+    except Exception as e:
+        last_err = e  # 仅用于最终消息
+    
+    # 所有途径均失败：返回友好提示，避免抛出异常
+    msg = (
+        f"No market data available for '{symbol}' between {start_date} and {end_date}. "
+        f"Checked: offline '{offline_path}', cache_dir='{cache_dir}'."
+    )
+    try:
+        msg += f" Online fetch failed."
+    except Exception:
+        pass
+    return msg
 
 
 def get_YFin_data_online_auto(
