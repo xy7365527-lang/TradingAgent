@@ -1,5 +1,9 @@
 name: Build macOS DMG
 
+# 需要创建 Release，请确保 GITHUB_TOKEN 具有 contents: write 权限
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
