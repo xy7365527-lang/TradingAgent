@@ -6,26 +6,32 @@ set -euo pipefail
 
 PYINSTALLER=${PYINSTALLER:-pyinstaller}
 APP_NAME=TradingAgentsGUI
+SPEC_CLI=TradingAgents.spec
+SPEC_GUI=TradingAgentsGUI.spec
 
 echo "[1/5] 清理旧构建..."
 rm -rf dist build
 
 echo "[2/5] 使用 PyInstaller 构建 CLI 与 GUI..."
-$PYINSTALLER --noconfirm --clean TradingAgents.spec
-$PYINSTALLER --noconfirm --clean TradingAgentsGUI.spec
+$PYINSTALLER --noconfirm --clean "$SPEC_CLI" || true
+$PYINSTALLER --noconfirm --clean "$SPEC_GUI"
 
-if [[ ! -d "dist/${APP_NAME}" ]]; then
+if [[ ! -d "dist/${APP_NAME}" && ! -d "dist/${APP_NAME}.app" ]]; then
   echo "ERROR: dist/${APP_NAME} 不存在，PyInstaller 构建失败" >&2
   exit 1
 fi
 
 echo "[3/5] 规范化 macOS 应用 Bundle..."
-APP_BUNDLE="dist/${APP_NAME}/${APP_NAME}.app"
+APP_BUNDLE="dist/${APP_NAME}.app"
 if [[ ! -d "$APP_BUNDLE" ]]; then
-  # 单文件/目录模式时，创建简单 .app 包装
-  mkdir -p "dist/${APP_NAME}.app/Contents/MacOS"
-  cp -R "dist/${APP_NAME}" "dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
-  APP_BUNDLE="dist/${APP_NAME}.app"
+  # 如果 PyInstaller 没有输出 .app（例如是目录/单文件），则包一层 .app
+  if [[ -d "dist/${APP_NAME}" ]]; then
+    mkdir -p "dist/${APP_NAME}.app/Contents/MacOS"
+    cp -R "dist/${APP_NAME}" "dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+  else
+    echo "ERROR: 未找到可用于打包的 GUI 产物" >&2
+    exit 1
+  fi
 fi
 
 echo "[4/5] 生成 DMG..."
