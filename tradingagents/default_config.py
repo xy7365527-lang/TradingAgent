@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
-    "max_recur_limit": 100,
+    "max_recur_limit": 200,
     # Tool settings
     "online_tools": True,
     # 当为 True 时：严格在线模式，禁用一切离线/缓存回退与自动切换离线

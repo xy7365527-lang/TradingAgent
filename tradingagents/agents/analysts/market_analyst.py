@@ -46,10 +46,10 @@ Volatility Indicators:
 Volume-Based Indicators:
             - vwma: VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.
 
-            - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_YFin_data first to retrieve the CSV that is needed to generate indicators. Write a very detailed and nuanced report of the trends you observe. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."""
+            - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Prefer calling get_YFin_data first to retrieve the CSV needed to generate indicators. Write a very detailed and nuanced report of the trends you observe. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.
 
-CRITICAL EXECUTION RULES: (1) Autonomously call at least one tool to gather information before drafting the report (start with get_YFin_data). (2) Never ask the user for additional input. (3) When calling tools, use the provided context values: ticker={ticker} and curr_date={current_date}. (4) If any data is missing, proceed with reasonable assumptions and produce a self-contained report for the last 7–30 days.
+CRITICAL EXECUTION RULES: (1) If this round has not yet fetched data, autonomously call at least one tool (start with get_YFin_data). If the context already contains recent tool outputs, do NOT call tools again—proceed to draft the final report directly. (2) Never ask the user for additional input. (3) When calling tools, use the provided context values: ticker={ticker} and curr_date={current_date}. (4) If any data is missing, proceed with reasonable assumptions and produce a self-contained report for the last 7–30 days.
 
 VERIFICATION REQUIREMENTS: For every key observation (trends, signals, divergences), verify using raw OHLCV data and computed indicator values. Explicitly cite the indicator names, parameters, and the date window used. If a signal cannot be confirmed by data, mark it as 'Undetermined' and consider fetching more lookback data."""
         )
@@ -66,7 +66,7 @@ VERIFICATION REQUIREMENTS: For every key observation (trends, signals, divergenc
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
                     " For your reference, the current date is {current_date}. The company we want to look at is {ticker}."
-                    " Always begin by invoking at least one of the tools to retrieve inputs (start with get_YFin_data). When providing tool arguments, pass ticker={ticker} and curr_date={current_date}."
+                    " If this round has not yet fetched data, begin by invoking at least one of the tools to retrieve inputs (prefer get_YFin_data). If the context already contains recent tool outputs, do NOT call tools again—proceed to write the final report. When providing tool arguments, pass ticker={ticker} and curr_date={current_date}."
                     " Do not ask the user any questions; proceed autonomously and output a complete report.",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
@@ -78,9 +78,34 @@ VERIFICATION REQUIREMENTS: For every key observation (trends, signals, divergenc
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
 
-        chain = prompt | llm.bind_tools(tools)
+        # After a tool round, avoid binding tools again in this analyst node to prevent loops
+        def _is_tool_message(msg) -> bool:
+            try:
+                from langchain_core.messages import ToolMessage  # type: ignore
+                return isinstance(msg, ToolMessage)
+            except Exception:
+                return type(msg).__name__ == "ToolMessage"
 
-        result = chain.invoke(state["messages"])
+        recent_msgs = state["messages"] if isinstance(state.get("messages"), list) else []
+        recent_tool_present = any(_is_tool_message(m) for m in recent_msgs[-4:])
+
+        chain = prompt | (llm if recent_tool_present else llm.bind_tools(tools))
+
+        # Budget the conversation to avoid context overflow
+        try:
+            model_name = toolkit.config.get("quick_think_llm")
+            max_msgs = int(toolkit.config.get("max_conv_messages", 50) or 50)
+            budgeted_messages = toolkit.budget_messages(
+                state["messages"],
+                model_name,
+                reply_tokens_budget=1024,
+                safety_margin=0.9,
+                max_messages=max_msgs,
+            )
+        except Exception:
+            budgeted_messages = state["messages"]
+
+        result = chain.invoke(budgeted_messages)
 
         report = ""
 

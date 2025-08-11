@@ -89,7 +89,19 @@ class TradingAgentsGraph:
         self.tool_nodes = self._create_tool_nodes()
 
         # Initialize components
-        self.conditional_logic = ConditionalLogic()
+        # Inject limits from config to conditional logic
+        try:
+            max_debate_rounds = int(self.config.get("max_debate_rounds", 1) or 1)
+        except Exception:
+            max_debate_rounds = 1
+        try:
+            max_risk_rounds = int(self.config.get("max_risk_discuss_rounds", 1) or 1)
+        except Exception:
+            max_risk_rounds = 1
+        self.conditional_logic = ConditionalLogic(
+            max_debate_rounds=max_debate_rounds,
+            max_risk_discuss_rounds=max_risk_rounds,
+        )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,
             self.deep_thinking_llm,
@@ -103,7 +115,12 @@ class TradingAgentsGraph:
             self.conditional_logic,
         )
 
-        self.propagator = Propagator()
+        # Make recursion limit configurable
+        try:
+            max_recur_limit = int(self.config.get("max_recur_limit", 100) or 100)
+        except Exception:
+            max_recur_limit = 100
+        self.propagator = Propagator(max_recur_limit=max_recur_limit)
         self.reflector = Reflector(self.quick_thinking_llm)
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
 

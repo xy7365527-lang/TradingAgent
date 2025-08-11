@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="tradingagents",
-    version="0.1.0",
+    version="0.1.4",
     description="Multi-Agents LLM Financial Trading Framework",
     author="TradingAgents Team",
     author_email="yijia.xiao@cs.ucla.edu",

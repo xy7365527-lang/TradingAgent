@@ -7,6 +7,7 @@ def create_risk_manager(llm, memory):
 
         company_name = state["company_of_interest"]
 
+        # Trim sections to mitigate context overflow
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
         market_research_report = state["market_report"]
@@ -21,6 +22,18 @@ def create_risk_manager(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # If Toolkit style trimmers available via memory, apply
+        try:
+            tk = memory.toolkit  # type: ignore[attr-defined]
+            market_research_report = tk.trim_section(market_research_report)
+            news_report = tk.trim_section(news_report)
+            fundamentals_report = tk.trim_section(fundamentals_report)
+            sentiment_report = tk.trim_section(sentiment_report)
+            history = tk.dynamic_budget_text(history, getattr(llm, "model", None), reply_tokens_budget=1024, safety_margin=0.9, hard_cap_chars=12000)
+            trader_plan = tk.trim_section(trader_plan)
+        except Exception:
+            pass
 
         prompt = f"""As the Risk Management Judge and Debate Facilitator, your goal is to evaluate the debate between three risk analysts—Risky, Neutral, and Safe/Conservative—and determine the best course of action for the trader. Your decision must result in a clear recommendation: Buy, Sell, or Hold. Choose Hold only if strongly justified by specific arguments, not as a fallback when all sides seem valid. Strive for clarity and decisiveness.
 

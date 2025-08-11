@@ -26,6 +26,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
+from tradingagents.utils.result_saver import save_analysis_results
 
 console = Console()
 # 界面语言：优先环境变量 TRADINGAGENTS_LANG，其次默认配置 ui_language
@@ -1266,6 +1267,25 @@ def run_analysis():
             display_complete_report(final_state)
 
         update_display(layout)
+
+        # Save results to local disk
+        try:
+            saved = save_analysis_results(
+                config=config,
+                ticker=selections["ticker"],
+                analysis_date=selections["analysis_date"],
+                final_state=final_state,
+                decision=decision,
+                ui_lang=UI_LANG,
+            )
+            console.print(
+                f"[green]已保存结果到: {saved.get('base_dir', '')}[/green]\n"
+                f"final_state.json: {saved.get('final_state', '')}\n"
+                f"final_report.md: {saved.get('final_report', '')}\n"
+                f"decision.txt: {saved.get('decision', '')}"
+            )
+        except Exception as e:
+            console.print(f"[red]保存本地结果失败: {e}[/red]")
 
 
 @app.command()

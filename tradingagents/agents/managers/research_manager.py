@@ -19,6 +19,14 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
+        # Trim long sections to avoid context overflow
+        cfg_model = getattr(llm, "model", None) if hasattr(llm, "model") else None
+        market_research_report = memory.toolkit.trim_section(market_research_report) if hasattr(memory, "toolkit") else market_research_report
+        sentiment_report = memory.toolkit.trim_section(sentiment_report) if hasattr(memory, "toolkit") else sentiment_report
+        news_report = memory.toolkit.trim_section(news_report) if hasattr(memory, "toolkit") else news_report
+        fundamentals_report = memory.toolkit.trim_section(fundamentals_report) if hasattr(memory, "toolkit") else fundamentals_report
+        history = memory.toolkit.dynamic_budget_text(history, cfg_model, reply_tokens_budget=1024, safety_margin=0.9, hard_cap_chars=12000) if hasattr(memory, "toolkit") else history
+
         prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
 
 Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.

@@ -2,7 +2,7 @@
 ; 需要先用 PyInstaller 生成 dist/TradingAgents 和 dist/TradingAgentsGUI
 
 #define MyAppName "TradingAgents"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.4"
 #define MyAppPublisher "Tauric Research"
 #define MyAppURL "https://github.com/TauricResearch/TradingAgents"
 

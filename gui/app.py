@@ -15,6 +15,7 @@ import requests
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.utils.result_saver import save_analysis_results
 
 
 class _GuiTextWriter:
@@ -1244,6 +1245,25 @@ class TradingAgentsGUI(tk.Tk):
                 else:
                     self.after(0, lambda: self.append(f"完成！决策: {decision}"))
                     self.after(0, lambda d=decision: self.lbl_decision.config(text=f"最终决策: {d}"))
+
+                # 保存到本地
+                try:
+                    saved = save_analysis_results(
+                        config=config,
+                        ticker=ticker,
+                        analysis_date=date_str,
+                        final_state=final_state,
+                        decision=decision,
+                        ui_lang=self.ui_lang,
+                    )
+                    self.after(0, lambda s=saved: self.append(
+                        "已保存结果到: " + s.get("base_dir", "") +
+                        f"\nfinal_state.json: {s.get('final_state','')}" +
+                        f"\nfinal_report.md: {s.get('final_report','')}" +
+                        f"\ndecision.txt: {s.get('decision','')}"
+                    ))
+                except Exception as e:  # noqa: BLE001
+                    self.after(0, lambda m=str(e): self.append(f"保存本地结果失败: {m}"))
             except Exception as e:  # noqa: BLE001
                 err_msg = str(e)
                 self.after(0, lambda m=err_msg: self.append(f"发生错误: {m}"))
