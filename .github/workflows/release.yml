@@ -1,0 +1,86 @@
+# GitHub Actions workflow to build installers for Windows and macOS on tag push
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --yes
+      - name: Build Windows installers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & installer\build_windows.ps1
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/**
+            Output/**
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Install create-dmg (optional)
+        run: |
+          brew install create-dmg || true
+      - name: Build macOS DMG
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: |
+          bash installer/build_macos.sh
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            dist/**
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: TradingAgents ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**
+
+
